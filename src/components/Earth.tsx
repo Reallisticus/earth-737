@@ -12,6 +12,11 @@ import {
   SphereGeometry,
   TextureLoader,
   WebGLRenderer,
+  BufferGeometry,
+  Float32BufferAttribute,
+  Points,
+  ShaderMaterial,
+  Vector3,
 } from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls";
 import { AiOutlinePause } from "react-icons/ai";
@@ -42,6 +47,55 @@ const Earth = () => {
     };
   }, []);
 
+  const generateRandomStarPositions = (count: number, radius: number) => {
+    const positions = new Float32Array(count * 3);
+
+    for (let i = 0; i < count * 3; i += 3) {
+      const randomVector = new Vector3(
+        Math.random() * 2 - 1,
+        Math.random() * 2 - 1,
+        Math.random() * 2 - 1
+      );
+
+      randomVector.normalize().multiplyScalar(radius);
+      positions[i] = randomVector.x;
+      positions[i + 1] = randomVector.y;
+      positions[i + 2] = randomVector.z;
+    }
+
+    return positions;
+  };
+
+  const createStarMaterial = (size: number, color: string) => {
+    return new ShaderMaterial({
+      uniforms: {
+        size: { value: size },
+        color: { value: new Color(color) },
+        time: { value: 0 },
+      },
+      vertexShader: `
+      uniform float size;
+      uniform float time;
+      varying float opacity;
+
+      void main() {
+        opacity = sin((position.y + time) * 2.0) * 0.5 + 0.5;
+        gl_PointSize = size * opacity;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `,
+      fragmentShader: `
+      uniform vec3 color;
+      varying float opacity;
+
+      void main() {
+        gl_FragColor = vec4(color, 1.0) * opacity;
+      }
+    `,
+      transparent: true,
+    });
+  };
+
   useEffect(() => {
     if (!containerRef.current) return;
 
@@ -64,14 +118,18 @@ const Earth = () => {
     earthTexture.wrapS = ClampToEdgeWrapping;
     earthTexture.wrapT = ClampToEdgeWrapping;
     const earthBumpMap = textureLoader.load("/bumpmap.jpg");
-    const cloudTexture = textureLoader.load("/cloud.jpg");
+    const cloudTexture = textureLoader.load("/cloudmap.jpg");
+    const cloudSpecularMap = textureLoader.load("cloud.jpg");
     const moonTexture = textureLoader.load("/moon.jpg");
+    const moonBumpMap = textureLoader.load("/moonbump.jpg");
+    const earthSpecularMap = textureLoader.load("/specular.jpg");
 
     const earthGeometry = new SphereGeometry(1, 32, 32);
     const earthMaterial = new MeshPhongMaterial({
       map: earthTexture,
       bumpMap: earthBumpMap,
       bumpScale: 0.1,
+      specularMap: earthSpecularMap,
       specular: new Color("grey"),
       shininess: 10,
     });
@@ -82,6 +140,8 @@ const Earth = () => {
     const cloudMaterial = new MeshPhongMaterial({
       map: cloudTexture,
       transparent: true,
+      specularMap: cloudSpecularMap,
+      specular: new Color("white"),
       opacity: 0.4,
     });
     const clouds = new Mesh(cloudGeometry, cloudMaterial);
@@ -89,15 +149,38 @@ const Earth = () => {
 
     // Create Moon
     const moonGeometry = new SphereGeometry(0.27, 32, 32);
-    const moonMaterial = new MeshPhongMaterial({ map: moonTexture });
+    const moonMaterial = new MeshPhongMaterial({
+      map: moonTexture,
+      bumpMap: moonBumpMap,
+      bumpScale: 0.01,
+    });
     const moon = new Mesh(moonGeometry, moonMaterial);
-    moon.position.set(2.5, 0, 0);
+    moon.position.set(4, 0, 0);
 
     const earthMoonGroup = new Group();
     earthMoonGroup.add(earth);
     earthMoonGroup.add(clouds);
     earthMoonGroup.add(moon);
     scene.add(earthMoonGroup);
+
+    const starCount = 1000;
+    const starSize = 0.1;
+    const starColor = "white";
+    const starRadius = 50;
+
+    const starGeometry = new BufferGeometry();
+    starGeometry.setAttribute(
+      "position",
+      new Float32BufferAttribute(
+        generateRandomStarPositions(starCount, starRadius),
+        3
+      )
+    );
+
+    const starMaterial = createStarMaterial(starSize, starColor);
+
+    const stars = new Points(starGeometry, starMaterial);
+    scene.add(stars);
 
     const ambientLight = new AmbientLight(0x404040);
     scene.add(ambientLight);
@@ -125,9 +208,10 @@ const Earth = () => {
       if (!paused) {
         earth.rotation.y += 0.0005;
         clouds.rotation.y += 0.0007;
+        starMaterial.uniforms.time!.value += 0.01;
 
-        moon.position.x = 2.5 * Math.cos(Date.now() * 0.00001);
-        moon.position.z = 2.5 * Math.sin(Date.now() * 0.00001);
+        moon.position.x = 4 * Math.cos(Date.now() * 0.00002);
+        moon.position.z = 4 * Math.sin(Date.now() * 0.00002);
       }
 
       // Update controls and render the scene
@@ -140,6 +224,7 @@ const Earth = () => {
 
   return (
     <div className="fixed inset-0">
+      <h1 className="earth-text font-earth737">Earth 737</h1>
       <div ref={containerRef} className="h-full w-full" />
       {paused && (
         <div className="fixed bottom-4 left-1/2 -translate-x-1/2 transform animate-pulse opacity-70">
