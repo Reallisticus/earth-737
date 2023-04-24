@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import {
   AmbientLight,
   ClampToEdgeWrapping,
@@ -20,10 +20,18 @@ import {
 } from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls";
 import { AiOutlinePause } from "react-icons/ai";
+import { useDynamicStyle } from "../hooks/useDynamicStyle";
 
 const Earth = () => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [paused, setPaused] = useState(false);
+  const [earthTextStyle, updateEarthTextStyle] = useDynamicStyle({
+    opacity: 1,
+  });
+
+  const [earthComingSoonStyle, updateEarthComingSoonStyle] = useDynamicStyle({
+    opacity: 1,
+  });
 
   const handleKeyDown = (event: KeyboardEvent) => {
     if (event.code === "Space") {
@@ -47,26 +55,29 @@ const Earth = () => {
     };
   }, []);
 
-  const generateRandomStarPositions = (count: number, radius: number) => {
-    const positions = new Float32Array(count * 3);
+  const generateRandomStarPositions = useCallback(
+    (count: number, radius: number) => {
+      const positions = new Float32Array(count * 3);
 
-    for (let i = 0; i < count * 3; i += 3) {
-      const randomVector = new Vector3(
-        Math.random() * 2 - 1,
-        Math.random() * 2 - 1,
-        Math.random() * 2 - 1
-      );
+      for (let i = 0; i < count * 3; i += 3) {
+        const randomVector = new Vector3(
+          Math.random() * 2 - 1,
+          Math.random() * 2 - 1,
+          Math.random() * 2 - 1
+        );
 
-      randomVector.normalize().multiplyScalar(radius);
-      positions[i] = randomVector.x;
-      positions[i + 1] = randomVector.y;
-      positions[i + 2] = randomVector.z;
-    }
+        randomVector.normalize().multiplyScalar(radius);
+        positions[i] = randomVector.x;
+        positions[i + 1] = randomVector.y;
+        positions[i + 2] = randomVector.z;
+      }
 
-    return positions;
-  };
+      return positions;
+    },
+    []
+  );
 
-  const createStarMaterial = (size: number, color: string) => {
+  const createStarMaterial = useCallback((size: number, color: string) => {
     return new ShaderMaterial({
       uniforms: {
         size: { value: size },
@@ -94,7 +105,7 @@ const Earth = () => {
     `,
       transparent: true,
     });
-  };
+  }, []);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -181,6 +192,7 @@ const Earth = () => {
 
     const stars = new Points(starGeometry, starMaterial);
     scene.add(stars);
+    scene.add(stars);
 
     const ambientLight = new AmbientLight(0x404040);
     scene.add(ambientLight);
@@ -199,6 +211,20 @@ const Earth = () => {
     controls.screenSpacePanning = false;
     controls.minDistance = 1.2;
     controls.maxDistance = 10;
+
+    const handleWheel = (event: WheelEvent) => {
+      const distance = camera.position.distanceTo(earth.position);
+      const thresholdDistance = 2;
+
+      const newOpacity = Math.max(
+        0,
+        Math.min(1, (distance - thresholdDistance) / 2)
+      );
+      updateEarthTextStyle({ opacity: newOpacity });
+      updateEarthComingSoonStyle({ opacity: newOpacity });
+    };
+
+    window.addEventListener("wheel", handleWheel);
 
     // Add an animation loop
     const animate = () => {
@@ -220,12 +246,23 @@ const Earth = () => {
     };
 
     animate();
-  }, [paused]);
+    return () => {
+      window.removeEventListener("wheel", handleWheel);
+    };
+  }, [paused, generateRandomStarPositions, createStarMaterial]);
 
   return (
     <div className="fixed inset-0">
-      <h1 className="earth-text font-earth737">Earth 737</h1>
+      <h1 className="earth-text font-earth737" style={earthTextStyle}>
+        Earth 737
+      </h1>
       <div ref={containerRef} className="h-full w-full" />
+      <h1
+        className="earth-coming-soon font-earth737"
+        style={earthComingSoonStyle}
+      >
+        Coming soon!
+      </h1>
       {paused && (
         <div className="fixed bottom-4 left-1/2 -translate-x-1/2 transform animate-pulse opacity-70">
           <AiOutlinePause className="text-4xl text-white" />
