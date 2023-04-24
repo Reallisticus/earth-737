@@ -4,7 +4,9 @@ import { z } from "zod";
  * Specify your server-side environment variables schema here. This way you can ensure the app isn't
  * built with invalid env vars.
  */
-const server = z.object({});
+const server = z.object({
+  NODE_ENV: z.enum(["development", "test", "production"]),
+});
 
 /**
  * Specify your client-side environment variables schema here. This way you can ensure the app isn't
@@ -26,6 +28,7 @@ const client = z.object(
  */
 const processEnv = {
   // NEXT_PUBLIC_CLIENTVAR: process.env.NEXT_PUBLIC_CLIENTVAR,
+  NODE_ENV: process.env.NODE_ENV,
 };
 
 // Don't touch the part below
