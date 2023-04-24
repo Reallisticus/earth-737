@@ -1,13 +1,21 @@
 import { useState } from "react";
+type Style = {
+  opacity: number;
+  // add other style properties as needed
+};
 
-export const useDynamicStyle = (initialStyle: any) => {
-  const [style, setStyle] = useState(initialStyle);
+type UseDynamicStyleReturnType = [
+  Style,
+  <T extends Style>(newStyle: Partial<T>) => void
+];
 
-  const updateStyle = (newStyle: any) => {
-    setStyle((prevStyle: any) => ({
-      ...prevStyle,
-      ...newStyle,
-    }));
+export const useDynamicStyle = <T extends Style>(
+  initialStyle: T
+): UseDynamicStyleReturnType => {
+  const [style, setStyle] = useState<T>(initialStyle);
+
+  const updateStyle = <U extends Style>(newStyle: Partial<U>) => {
+    setStyle((prevStyle) => ({ ...prevStyle, ...newStyle }));
   };
 
   return [style, updateStyle];

@@ -22,16 +22,21 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls";
 import { AiOutlinePause } from "react-icons/ai";
 import { useDynamicStyle } from "../hooks/useDynamicStyle";
 
+interface TextStyle {
+  opacity: number;
+}
+
 const Earth = () => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [paused, setPaused] = useState(false);
-  const [earthTextStyle, updateEarthTextStyle] = useDynamicStyle({
+  const [earthTextStyle, updateEarthTextStyle] = useDynamicStyle<TextStyle>({
     opacity: 1,
   });
 
-  const [earthComingSoonStyle, updateEarthComingSoonStyle] = useDynamicStyle({
-    opacity: 1,
-  });
+  const [earthComingSoonStyle, updateEarthComingSoonStyle] =
+    useDynamicStyle<TextStyle>({
+      opacity: 1,
+    });
 
   const handleKeyDown = (event: KeyboardEvent) => {
     if (event.code === "Space") {
