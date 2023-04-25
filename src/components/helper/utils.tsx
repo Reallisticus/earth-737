@@ -1,14 +1,17 @@
-import { Mesh, MeshBasicMaterial, MeshPhongMaterial } from "three";
+import type { Mesh } from "three";
 
-export const debounce = (
-  func: { apply: (arg0: undefined, arg1: any[]) => void },
+import { MeshBasicMaterial, MeshPhongMaterial } from "three";
+
+export const debounce = <T extends (...args: any[]) => any>(
+  func: T,
   wait: number | undefined
-) => {
-  let timeout: string | number | NodeJS.Timeout | undefined;
-  return (...args: any) => {
-    clearTimeout(timeout);
-    timeout = setTimeout(() => func.apply(this, args), wait);
-  };
+): T => {
+  let timeout: number | NodeJS.Timeout | undefined;
+  return ((...args: any[]) => {
+    clearTimeout(timeout as number | NodeJS.Timeout);
+    // eslint-disable-next-line
+    timeout = setTimeout(() => func(...args), wait);
+  }) as T;
 };
 
 export const disposeMesh = (mesh: Mesh) => {
