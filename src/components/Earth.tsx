@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   AmbientLight,
   ClampToEdgeWrapping,
@@ -15,26 +15,34 @@ import {
   BufferGeometry,
   Float32BufferAttribute,
   Points,
-  ShaderMaterial,
   Vector3,
   Raycaster,
   Vector2,
   LoadingManager,
+  PCFSoftShadowMap,
+  PointLight,
+  ShaderMaterial,
+  AdditiveBlending,
+  PointsMaterial,
+  BufferAttribute,
 } from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls";
 import { AiOutlinePause } from "react-icons/ai";
 import Loader from "./Loader";
+import {
+  createStarMaterial,
+  generateRandomStarPositions,
+  generateRandomStarSizes,
+  starColors,
+} from "./helper/stars";
+import { debounce, disposeMesh } from "./helper/utils";
+import { generateSolarEruptionPositions } from "./helper/sun";
 
 const Earth = () => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const earthTextRef = useRef<HTMLHeadingElement | null>(null);
   const earthComingSoonRef = useRef<HTMLHeadingElement | null>(null);
-  const [hoveredObject, setHoveredObject] = useState<Mesh | null>(null);
-  const [cameraTarget, setCameraTarget] = useState("earth");
-  const [cameraPosition, setCameraPosition] = useState(new Vector3(0, 0, 3));
   const [loading, setLoading] = useState(true);
-
-  const [selectedObject, setSelectedObject] = useState<Mesh | null>(null);
 
   const [paused, setPaused] = useState(false);
 
@@ -44,119 +52,15 @@ const Earth = () => {
     }
   };
 
-  const handleKeyDown = (event: KeyboardEvent) => {
-    const speed = 0.1;
-    switch (event.code) {
-      case "KeyW":
-        setCameraPosition((prevPosition) =>
-          prevPosition.add(new Vector3(0, 0, -speed))
-        );
-        break;
-      case "KeyA":
-        setCameraPosition((prevPosition) =>
-          prevPosition.add(new Vector3(-speed, 0, 0))
-        );
-        break;
-      case "KeyS":
-        setCameraPosition((prevPosition) =>
-          prevPosition.add(new Vector3(0, 0, speed))
-        );
-        break;
-      case "KeyD":
-        setCameraPosition((prevPosition) =>
-          prevPosition.add(new Vector3(speed, 0, 0))
-        );
-        break;
-      default:
-        break;
-    }
-  };
+  useEffect(() => {
+    window.addEventListener("keydown", handleKey);
+    window.addEventListener("keyup", handleKey);
 
-  // useEffect(() => {
-  //   window.addEventListener("keydown", handleKey);
-  //   window.addEventListener("keyup", handleKey);
-
-  //   return () => {
-  //     window.removeEventListener("keydown", handleKey);
-  //     window.removeEventListener("keyup", handleKey);
-  //   };
-  // }, []);
-
-  const generateRandomStarPositions = useCallback(
-    (count: number, radius: number) => {
-      const positions = new Float32Array(count * 3);
-
-      for (let i = 0; i < count * 3; i += 3) {
-        const randomVector = new Vector3(
-          Math.random() * 2 - 1,
-          Math.random() * 2 - 1,
-          Math.random() * 2 - 1
-        );
-
-        randomVector.normalize().multiplyScalar(radius);
-        positions[i] = randomVector.x;
-        positions[i + 1] = randomVector.y;
-        positions[i + 2] = randomVector.z;
-      }
-
-      return positions;
-    },
-    []
-  );
-
-  const generateRandomStarSizes = (
-    count: number,
-    minSize: number,
-    maxSize: number
-  ) => {
-    const sizes = new Float32Array(count);
-
-    for (let i = 0; i < count; i++) {
-      sizes[i] = Math.random() * (maxSize - minSize) + minSize;
-    }
-
-    return sizes;
-  };
-
-  const getRandomArbitrary = (min: number, max: number) => {
-    return Math.random() * (max - min) + min;
-  };
-
-  const createStarMaterial = useCallback((colors: string[]) => {
-    return new ShaderMaterial({
-      uniforms: {
-        size: { value: getRandomArbitrary(0.05, 5) },
-        color: {
-          value: new Color(colors[Math.floor(Math.random() * colors.length)]),
-        },
-        time: { value: 0 },
-      },
-      vertexShader: `
-      attribute float size;
-      uniform float time;
-      varying float opacity;
-
-      void main() {
-        opacity = sin((position.y + time) * 2.0) * 0.5 + 0.5;
-        gl_PointSize = size * opacity;
-        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-      }
-    `,
-      fragmentShader: `
-      uniform vec3 color;
-      varying float opacity;
-
-      void main() {
-        float distanceFromCenter = distance(gl_PointCoord, vec2(0.5, 0.5));
-        float edgeOpacity = 1.0 - smoothstep(0.4, 0.5, distanceFromCenter);
-        gl_FragColor = vec4(color, opacity * edgeOpacity);
-      }
-    `,
-      transparent: true,
-    });
+    return () => {
+      window.removeEventListener("keydown", handleKey);
+      window.removeEventListener("keyup", handleKey);
+    };
   }, []);
-
-  const starColors = ["#ffffff", "#ffaa00", "#00aaff", "#aaaaff"];
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -179,7 +83,6 @@ const Earth = () => {
       0.1,
       1000
     );
-    camera.position.copy(cameraPosition);
 
     const renderer = new WebGLRenderer();
     renderer.setSize(window.innerWidth, window.innerHeight);
@@ -188,15 +91,107 @@ const Earth = () => {
     // Add your objects here
     const textureLoader = new TextureLoader(manager);
 
-    const earthTexture = textureLoader.load("/earthmap.jpg");
+    const earthTexture = textureLoader.load(
+      "https://earth737.s3.eu-central-1.amazonaws.com/earthmap.jpg"
+    );
     earthTexture.wrapS = ClampToEdgeWrapping;
     earthTexture.wrapT = ClampToEdgeWrapping;
-    const earthBumpMap = textureLoader.load("/bumpmap.jpg");
-    const cloudTexture = textureLoader.load("/cloudmap.jpg");
-    const cloudSpecularMap = textureLoader.load("cloud.jpg");
-    const moonTexture = textureLoader.load("/moon.jpg");
-    const moonBumpMap = textureLoader.load("/moonbump.jpg");
-    const earthSpecularMap = textureLoader.load("/specular.jpg");
+    const earthBumpMap = textureLoader.load(
+      "https://earth737.s3.eu-central-1.amazonaws.com/bumpmap.jpg"
+    );
+    const cloudTexture = textureLoader.load(
+      "https://earth737.s3.eu-central-1.amazonaws.com/cloudmap.jpg"
+    );
+    const cloudSpecularMap = textureLoader.load(
+      "https://earth737.s3.eu-central-1.amazonaws.com/cloud.jpg"
+    );
+    const moonTexture = textureLoader.load(
+      "https://earth737.s3.eu-central-1.amazonaws.com/moon.jpg"
+    );
+    const moonBumpMap = textureLoader.load(
+      "https://earth737.s3.eu-central-1.amazonaws.com/moonbump.jpg"
+    );
+    const earthSpecularMap = textureLoader.load(
+      "https://earth737.s3.eu-central-1.amazonaws.com/specular.jpg"
+    );
+
+    const sunTexture = textureLoader.load("sun.jpg");
+    const sunDisplacementMap = textureLoader.load("sun.jpg");
+
+    const sunGeometry = new SphereGeometry(5, 32, 32); // Adjust size as needed
+    const sunMaterial = new ShaderMaterial({
+      vertexShader: `
+      varying vec2 vUv;
+  uniform float time;
+
+  void main() {
+    vUv = uv;
+
+    vec3 pos = position;
+
+    // Adjust the displacement amount and speed as needed
+    float displacementAmount = 0.05;
+    float speed = 0.5;
+
+    pos.z += sin((uv.y + time) * speed) * displacementAmount;
+    pos.x += cos((uv.x + time) * speed) * displacementAmount;
+
+    vec4 modelViewPosition = modelViewMatrix * vec4(pos, 1.0);
+    gl_Position = projectionMatrix * modelViewPosition;
+  }`,
+      fragmentShader: `
+     varying vec2 vUv;
+  uniform sampler2D map;
+  uniform sampler2D emissiveMap;
+  uniform float emissiveIntensity;
+  
+  void main() {
+    vec4 color = texture2D(map, vUv);
+    vec3 emissiveColor = texture2D(emissiveMap, vUv).rgb * emissiveIntensity;
+    gl_FragColor = vec4(color.rgb + emissiveColor, 1.0);
+  }
+  `,
+      uniforms: {
+        map: { value: sunTexture },
+        emissiveMap: { value: sunTexture },
+        displacementMap: { value: sunDisplacementMap },
+        displacementScale: { value: 0.5 },
+        emissiveIntensity: { value: 1.5 },
+        time: { value: 0 },
+      },
+    });
+    const sun = new Mesh(sunGeometry, sunMaterial);
+    sun.position.set(-30, 0, 0); // Adjust position as needed
+    scene.add(sun);
+
+    // Solar eruptions
+    const eruptionCount = 5000;
+    const eruptionRadius = 5.5; // Adjust to match the size of the sun
+
+    const eruptionGeometry = new BufferGeometry();
+    eruptionGeometry.setAttribute(
+      "position",
+      new Float32BufferAttribute(
+        generateSolarEruptionPositions(eruptionCount, eruptionRadius),
+        3
+      )
+    );
+
+    const eruptionTexture = textureLoader.load(
+      "https://trafffic.com/wp-content/uploads/2014/08/circle-white.png"
+    ); // Particle texture (a white dot)
+
+    const eruptionMaterial = new PointsMaterial({
+      size: 0.1,
+      transparent: true,
+      opacity: 0.7,
+      map: eruptionTexture,
+      blending: AdditiveBlending,
+      depthTest: false,
+    });
+
+    const solarEruptions = new Points(eruptionGeometry, eruptionMaterial);
+    sun.add(solarEruptions);
 
     const earthGeometry = new SphereGeometry(1, 32, 32);
     const earthMaterial = new MeshPhongMaterial({
@@ -238,6 +233,12 @@ const Earth = () => {
 
     scene.add(earthMoonGroup);
 
+    const solarSystemGroup = new Group();
+    solarSystemGroup.add(sun);
+    solarSystemGroup.add(earthMoonGroup);
+
+    scene.add(solarSystemGroup);
+
     const starCount = 1000;
     const starMinSize = 0.05;
     const starMaxSize = 5;
@@ -267,66 +268,25 @@ const Earth = () => {
     const raycaster = new Raycaster();
     const mouse = new Vector2();
 
-    const focusOnObject = (object: Mesh) => {
-      camera.position.set(
-        object.position.x,
-        object.position.y,
-        object.position.z + 3
-      );
-      controls.target.copy(object.position);
-    };
+    const pointLight = new PointLight(0xffffff, 1, 1000); // Change the distance (third parameter) as needed
+    pointLight.position.copy(sun.position);
 
-    const handleMouseMove = (event: MouseEvent) => {
-      // Prevent the default context menu from showing up on right-click
-      if (event.button === 2) {
-        event.preventDefault();
-      }
+    scene.add(pointLight);
 
-      mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
-      mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+    moon.castShadow = true;
+    earth.castShadow = true;
+    clouds.receiveShadow = true;
 
-      raycaster.setFromCamera(mouse, camera);
-      const intersects = raycaster.intersectObjects([earth, moon]);
-
-      if (intersects.length > 0 && intersects[0]) {
-        setHoveredObject(intersects[0].object as Mesh);
-        if (event.button === 2) {
-          setSelectedObject(intersects[0].object as Mesh);
-        }
-      } else {
-        setHoveredObject(null);
-        if (event.button === 2) {
-          setSelectedObject(null);
-        }
-      }
-    };
-
-    const handleDoubleClick = (event: MouseEvent) => {
-      event.preventDefault();
-      raycaster.setFromCamera(mouse, camera);
-      const intersects = raycaster.intersectObjects([earth, moon]);
-
-      if (intersects.length > 0 && intersects[0]) {
-        if (intersects[0].object === earth) {
-          focusOnObject(earth);
-        } else if (intersects[0].object === moon) {
-          focusOnObject(moon);
-        }
-      }
-    };
-
-    window.addEventListener("mousedown", handleMouseMove);
-    containerRef.current.addEventListener("dblclick", handleDoubleClick);
-
-    const ambientLight = new AmbientLight(0x404040);
-    scene.add(ambientLight);
-
-    const directionalLight = new DirectionalLight(0xffffff, 1);
-    directionalLight.position.set(5, 3, 5);
-    scene.add(directionalLight);
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = PCFSoftShadowMap;
+    pointLight.castShadow = true;
+    pointLight.shadow.mapSize.width = 2048;
+    pointLight.shadow.mapSize.height = 2048;
+    pointLight.shadow.camera.near = 0.1;
+    pointLight.shadow.camera.far = 50;
 
     // Set up the camera
-    camera.position.z = 3;
+    camera.position.z = 10;
 
     // Set up the controls
     const controls = new OrbitControls(camera, renderer.domElement);
@@ -334,7 +294,9 @@ const Earth = () => {
     controls.dampingFactor = 0.05;
     controls.screenSpacePanning = false;
     controls.minDistance = 1.2;
-    controls.maxDistance = 10;
+    controls.maxDistance = 45;
+
+    controls.target.copy(earth.position);
 
     const handleWheel = (event: WheelEvent) => {
       const distance = camera.position.distanceTo(earth.position);
@@ -348,24 +310,119 @@ const Earth = () => {
       earthComingSoonRef.current!.style.opacity = newOpacity.toString();
     };
 
-    window.addEventListener("wheel", handleWheel);
+    const handleResize = () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    };
+
+    window.addEventListener("resize", handleResize);
+
+    window.addEventListener("wheel", debounce(handleWheel, 100));
+
+    const earthOrbitRadius = 15; // Adjust as needed
+    const earthOrbitSpeed = 0.0005; // Adjust as needed
+    const lastValidTarget = new Vector3();
+
+    function onMouseMove(event: { clientX: number; clientY: number }) {
+      // calculate mouse position in normalized device coordinates
+      // (-1 to +1) for both components
+      mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+      mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+      raycaster.setFromCamera(mouse, camera);
+
+      // calculate objects intersecting the picking ray
+      const intersects = raycaster.intersectObjects(scene.children, true);
+
+      const filteredIntersects = intersects.filter(
+        (intersect) => intersect.object !== sun
+      );
+
+      if (filteredIntersects.length > 0) {
+        // Set controls target to the first intersected object
+        lastValidTarget.copy(controls.target);
+        controls.target.copy(filteredIntersects[0]!.object.position);
+      } else {
+        // Reset controls target to the sun's position when no object is intersected
+        controls.target.copy(lastValidTarget);
+      }
+    }
 
     // Add an animation loop
     const animate = () => {
-      requestAnimationFrame(animate);
-      raycaster.setFromCamera(mouse, camera);
+      const eruptionsSpeed = 0.01;
 
-      if (cameraTarget === "earth") {
-        controls.target.copy(earth.position);
-      } else if (cameraTarget === "moon") {
-        controls.target.copy(moon.position);
-      }
+      requestAnimationFrame(animate);
+      earth.getWorldPosition(controls.target);
 
       // Rotate the Earth and clouds
       if (!paused) {
+        if (
+          solarEruptions.geometry.attributes.position instanceof BufferAttribute
+        ) {
+          const positions = solarEruptions.geometry.attributes.position.array;
+          const mutablePositions = Array.from(positions);
+
+          if (mutablePositions) {
+            mutablePositions.forEach((_, index) => {
+              if ((index + 1) % 3 === 0) {
+                const distanceToSun = Math.sqrt(
+                  Math.pow(mutablePositions[index - 2] as number, 2) +
+                    Math.pow(mutablePositions[index - 1] as number, 2) +
+                    Math.pow(mutablePositions[index] as number, 2)
+                );
+
+                const normalizedDistance = Math.min(
+                  1,
+                  distanceToSun / eruptionRadius
+                );
+
+                mutablePositions[index - 2] +=
+                  mutablePositions[index - 2]! *
+                  eruptionsSpeed *
+                  normalizedDistance;
+                mutablePositions[index - 1] +=
+                  mutablePositions[index - 1]! *
+                  eruptionsSpeed *
+                  normalizedDistance;
+                mutablePositions[index] +=
+                  mutablePositions[index]! *
+                  eruptionsSpeed *
+                  normalizedDistance;
+
+                if (distanceToSun > eruptionRadius * 2) {
+                  const newPos = new Vector3(
+                    (Math.random() - 0.5) * 2 * eruptionRadius,
+                    (Math.random() - 0.5) * 2 * eruptionRadius,
+                    (Math.random() - 0.5) * 2 * eruptionRadius
+                  );
+                  if (newPos.length() < eruptionRadius) {
+                    mutablePositions[index - 2] = newPos.x;
+                    mutablePositions[index - 1] = newPos.y;
+                    mutablePositions[index] = newPos.z;
+                  }
+                }
+              }
+            });
+          }
+          solarEruptions.geometry.attributes.position.array = new Float32Array(
+            mutablePositions
+          );
+        }
+
         earth.rotation.y += 0.0005;
         clouds.rotation.y += 0.0007;
         starMaterial.uniforms.time!.value += 0.01;
+        const elapsedTime = Date.now() * earthOrbitSpeed;
+
+        sun.position.x += 0.005;
+        sun.position.z += 0.002;
+
+        earthMoonGroup.position.x =
+          sun.position.x + earthOrbitRadius * Math.cos(elapsedTime);
+        earthMoonGroup.position.z =
+          sun.position.z + earthOrbitRadius * Math.sin(elapsedTime);
 
         moon.position.x = 4 * Math.cos(Date.now() * 0.00002);
         moon.position.z = 4 * Math.sin(Date.now() * 0.00002);
@@ -376,26 +433,24 @@ const Earth = () => {
       renderer.render(scene, camera);
     };
 
+    window.addEventListener("mousemove", onMouseMove, false);
+
     animate();
     return () => {
       window.removeEventListener("wheel", handleWheel);
-      window.removeEventListener("mousedown", handleMouseMove);
+      window.removeEventListener("resize", handleResize);
 
-      if (containerRef.current) {
-        containerRef.current.removeEventListener("dblclick", handleDoubleClick);
-      }
+      disposeMesh(earth);
+      disposeMesh(clouds);
+      disposeMesh(moon);
+      stars.geometry.dispose();
+      stars.material.dispose();
     };
   }, [paused, generateRandomStarPositions, createStarMaterial]);
 
-  useEffect(() => {
-    window.addEventListener("keydown", handleKeyDown);
-    return () => {
-      window.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [handleKeyDown]);
-
   return (
     <div className="fixed inset-0">
+      {loading && <Loader />}
       <h1 ref={earthTextRef} className="earth-text no-select font-earth737">
         Earth 737
       </h1>{" "}
@@ -411,7 +466,6 @@ const Earth = () => {
           <AiOutlinePause className="text-4xl text-white" />
         </div>
       )}
-      {loading && <Loader />}
     </div>
   );
 };
