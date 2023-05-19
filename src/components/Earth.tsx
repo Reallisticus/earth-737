@@ -25,6 +25,7 @@ import {
   AdditiveBlending,
   PointsMaterial,
   BufferAttribute,
+  NormalBlending,
 } from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls";
 import { AiOutlinePause } from "react-icons/ai";
@@ -46,21 +47,7 @@ const Earth = () => {
 
   const [paused, setPaused] = useState(false);
 
-  const handleKey = (event: KeyboardEvent) => {
-    if (event.code === "Space") {
-      setPaused(event.type === "keydown");
-    }
-  };
-
-  useEffect(() => {
-    window.addEventListener("keydown", handleKey);
-    window.addEventListener("keyup", handleKey);
-
-    return () => {
-      window.removeEventListener("keydown", handleKey);
-      window.removeEventListener("keyup", handleKey);
-    };
-  }, []);
+  const moveSpeed = 5;
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -83,6 +70,44 @@ const Earth = () => {
       0.1,
       1000
     );
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.code === "Space") {
+        setPaused(true);
+      } else {
+        controls.dispose();
+
+        const camDirection = new Vector3();
+        camera.getWorldDirection(camDirection);
+        const camRight = camDirection.clone().cross(camera.up).normalize();
+        const camForward = camDirection.multiplyScalar(-1).normalize();
+
+        if (event.code === "KeyW") {
+          // Move forward
+          camera.position.addScaledVector(camForward, moveSpeed);
+        } else if (event.code === "KeyS") {
+          // Move backward
+          camera.position.addScaledVector(camForward, -moveSpeed);
+        } else if (event.code === "KeyA") {
+          // Move left
+          camera.position.addScaledVector(camRight, -moveSpeed);
+        } else if (event.code === "KeyD") {
+          // Move right
+          camera.position.addScaledVector(camRight, moveSpeed);
+        }
+      }
+    };
+
+    const handleKeyUp = (event: KeyboardEvent) => {
+      if (event.code === "Space") {
+        setPaused(false);
+      } else {
+        controls = new OrbitControls(camera, renderer.domElement);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("keyup", handleKeyUp);
 
     const renderer = new WebGLRenderer();
     renderer.setSize(window.innerWidth, window.innerHeight);
@@ -114,6 +139,10 @@ const Earth = () => {
     const earthSpecularMap = textureLoader.load(
       "https://earth737.s3.eu-central-1.amazonaws.com/specular.jpg"
     );
+
+    const earthCountryTexture = textureLoader.load("/earthmap-countries.jpg");
+    earthCountryTexture.wrapS = ClampToEdgeWrapping;
+    earthCountryTexture.wrapT = ClampToEdgeWrapping;
 
     const sunTexture = textureLoader.load("sun.jpg");
     const sunDisplacementMap = textureLoader.load("sun.jpg");
@@ -155,9 +184,9 @@ const Earth = () => {
         map: { value: sunTexture },
         emissiveMap: { value: sunTexture },
         displacementMap: { value: sunDisplacementMap },
-        displacementScale: { value: 0.5 },
-        emissiveIntensity: { value: 1.5 },
-        time: { value: 0 },
+        displacementScale: { value: 0.2 },
+        emissiveIntensity: { value: 1 },
+        time: { value: 0.5 },
       },
     });
     const sun = new Mesh(sunGeometry, sunMaterial);
@@ -166,7 +195,10 @@ const Earth = () => {
 
     // Solar eruptions
     const eruptionCount = 5000;
-    const eruptionRadius = 5.5; // Adjust to match the size of the sun
+    const eruptionRadius = 3.5; // Adjust to match the size of the sun
+
+    const spacecraftCount = 600;
+    const spacecraftRadious = 1.5;
 
     const eruptionGeometry = new BufferGeometry();
     eruptionGeometry.setAttribute(
@@ -177,25 +209,22 @@ const Earth = () => {
       )
     );
 
+    const spacecraftGeometry = new BufferGeometry();
+    spacecraftGeometry.setAttribute(
+      "position",
+      new Float32BufferAttribute(
+        generateSolarEruptionPositions(spacecraftCount, spacecraftRadious),
+        3
+      )
+    );
+
     const eruptionTexture = textureLoader.load(
       "https://trafffic.com/wp-content/uploads/2014/08/circle-white.png"
     ); // Particle texture (a white dot)
 
-    const eruptionMaterial = new PointsMaterial({
-      size: 0.1,
-      transparent: true,
-      opacity: 0.7,
-      map: eruptionTexture,
-      blending: AdditiveBlending,
-      depthTest: false,
-    });
-
-    const solarEruptions = new Points(eruptionGeometry, eruptionMaterial);
-    sun.add(solarEruptions);
-
     const earthGeometry = new SphereGeometry(1, 32, 32);
     const earthMaterial = new MeshPhongMaterial({
-      map: earthTexture,
+      map: earthCountryTexture,
       bumpMap: earthBumpMap,
       bumpScale: 0.1,
       specularMap: earthSpecularMap,
@@ -265,6 +294,30 @@ const Earth = () => {
     const stars = new Points(starGeometry, starMaterial);
     scene.add(stars);
 
+    const eruptionMaterial = new PointsMaterial({
+      size: 0.05,
+      transparent: true,
+      opacity: 0.7,
+      map: eruptionTexture,
+      blending: AdditiveBlending,
+      depthTest: true,
+    });
+
+    const spacecraftMaterial = new PointsMaterial({
+      size: 0.02,
+      transparent: true,
+      opacity: 1,
+      map: eruptionTexture,
+      blending: AdditiveBlending,
+      depthTest: true,
+    });
+
+    const solarEruptions = new Points(eruptionGeometry, eruptionMaterial);
+    sun.add(solarEruptions);
+
+    const spaceCraft = new Points(spacecraftGeometry, spacecraftMaterial);
+    earth.add(spaceCraft);
+
     const raycaster = new Raycaster();
     const mouse = new Vector2();
 
@@ -286,10 +339,10 @@ const Earth = () => {
     pointLight.shadow.camera.far = 50;
 
     // Set up the camera
-    camera.position.z = 10;
+    camera.position.z = 3;
 
     // Set up the controls
-    const controls = new OrbitControls(camera, renderer.domElement);
+    let controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
     controls.dampingFactor = 0.05;
     controls.screenSpacePanning = false;
@@ -321,7 +374,7 @@ const Earth = () => {
     window.addEventListener("wheel", debounce(handleWheel, 100));
 
     const earthOrbitRadius = 15; // Adjust as needed
-    const earthOrbitSpeed = 0.0005; // Adjust as needed
+    const earthOrbitSpeed = 0.00001; // Adjust as needed
     const lastValidTarget = new Vector3();
 
     function onMouseMove(event: { clientX: number; clientY: number }) {
@@ -351,7 +404,7 @@ const Earth = () => {
 
     // Add an animation loop
     const animate = () => {
-      const eruptionsSpeed = 0.01;
+      const eruptionsSpeed = 0.3;
 
       requestAnimationFrame(animate);
       earth.getWorldPosition(controls.target);
@@ -439,6 +492,8 @@ const Earth = () => {
     return () => {
       window.removeEventListener("wheel", handleWheel);
       window.removeEventListener("resize", handleResize);
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("keyup", handleKeyUp);
 
       disposeMesh(earth);
       disposeMesh(clouds);
