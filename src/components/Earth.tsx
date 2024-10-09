@@ -6,26 +6,33 @@ import lines from "../../public/lines.json";
 import map from "../../public/map.json";
 import _ from "lodash";
 import { gsap } from "gsap";
+import FuturisticAuthForm from "./form";
+import Loader from "./Loader";
 
 const Earth = () => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const formRef = useRef<HTMLDivElement | null>(null);
-  const [isLoginVisible, setIsLoginVisible] = useState(false);
-  const INITIAL_DISTANCE = 400;
   const globeRef = useRef<any>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const controlsRef = useRef<OrbitControls | null>(null);
   const animationFrameId = useRef<number | null>(null);
+  const [isLoginVisible, setIsLoginVisible] = useState(false);
+  const [isInitialized, setIsInitialized] = useState(false);
+  const [isLoading, setIsLoading] = useState(true); // New state for loading
+
+  const INITIAL_DISTANCE = 400;
 
   useEffect(() => {
     const initScene = () => {
       sceneRef.current = new THREE.Scene();
-      sceneRef.current.background = new THREE.Color(0x040d21);
+      sceneRef.current.background = new THREE.Color(0x040c1e);
 
       const ambientLight = new THREE.AmbientLight(0xbbbbbb, 0.3);
       sceneRef.current.add(ambientLight);
+
+      addStarfield();
     };
 
     const initRenderer = () => {
@@ -33,6 +40,19 @@ const Earth = () => {
       rendererRef.current.setPixelRatio(window.devicePixelRatio);
       rendererRef.current.setSize(window.innerWidth, window.innerHeight);
       containerRef.current?.appendChild(rendererRef.current.domElement);
+    };
+    const addLogo = () => {
+      const logo = document.createElement("img");
+      logo.src = "/earth737.png"; // Assuming the image is in the public directory
+      logo.alt = "Earth737 Logo";
+      logo.style.position = "absolute";
+      logo.style.bottom = "20px";
+      logo.style.left = "20px";
+      logo.style.zIndex = "10";
+      logo.style.maxWidth = "150px"; // Adjust this value as needed
+      logo.style.height = "auto";
+      logo.style.opacity = "0.8"; // Slightly transparent to blend with the space theme
+      containerRef.current?.appendChild(logo);
     };
 
     const initCamera = () => {
@@ -85,6 +105,30 @@ const Earth = () => {
       }
     };
 
+    const addStarfield = () => {
+      const starGeometry = new THREE.BufferGeometry();
+      const starMaterial = new THREE.PointsMaterial({
+        color: 0xffffff,
+        size: 0.7,
+        sizeAttenuation: false,
+      });
+
+      const starVertices = [];
+      for (let i = 0; i < 10000; i++) {
+        const x = (Math.random() - 0.5) * 2000;
+        const y = (Math.random() - 0.5) * 2000;
+        const z = (Math.random() - 0.5) * 2000;
+        starVertices.push(x, y, z);
+      }
+
+      starGeometry.setAttribute(
+        "position",
+        new THREE.Float32BufferAttribute(starVertices, 3)
+      );
+      const stars = new THREE.Points(starGeometry, starMaterial);
+      sceneRef.current?.add(stars);
+    };
+
     const initGlobe = async () => {
       const ThreeGlobe = (await import("three-globe")).default;
 
@@ -120,6 +164,9 @@ const Earth = () => {
             .pointsMerge(true)
             .pointAltitude(0.07)
             .pointRadius(0.05);
+
+          setIsInitialized(true); // Set initialization flag
+          setIsLoading(false); // Set loading to false when globe is ready
         }, 1000);
 
         globeRef.current.rotateY(-Math.PI * (5 / 9));
@@ -161,6 +208,7 @@ const Earth = () => {
           },
           onComplete: () => {
             setIsLoginVisible(true);
+            saveState();
           },
         });
 
@@ -194,6 +242,8 @@ const Earth = () => {
       animationFrameId.current = requestAnimationFrame(animate);
     };
 
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
     // Initialization
     initScene();
     initRenderer();
@@ -201,6 +251,7 @@ const Earth = () => {
     initControls();
     initGlobe();
     animate();
+    addLogo();
 
     // Event listeners
     window.addEventListener("resize", onWindowResize);
@@ -208,6 +259,8 @@ const Earth = () => {
     // Cleanup
     return () => {
       window.removeEventListener("resize", onWindowResize);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+
       if (controlsRef.current) controlsRef.current.dispose();
       if (sceneRef.current) {
         sceneRef.current.clear();
@@ -222,6 +275,10 @@ const Earth = () => {
       }
       if (animationFrameId.current) {
         cancelAnimationFrame(animationFrameId.current);
+      }
+      const logo = containerRef.current?.querySelector("img");
+      if (logo) {
+        containerRef.current?.removeChild(logo);
       }
     };
   }, []);
@@ -244,23 +301,92 @@ const Earth = () => {
     }
   }, [isLoginVisible]);
 
+  useEffect(() => {
+    if (isInitialized) {
+      const savedState = localStorage.getItem("earthState");
+      if (savedState) {
+        const { globePosition, cameraPosition, controlsEnabled } =
+          JSON.parse(savedState);
+        if (globeRef.current && cameraRef.current && controlsRef.current) {
+          globeRef.current.position.set(
+            globePosition.x,
+            globePosition.y,
+            globePosition.z
+          );
+          cameraRef.current.position.set(
+            cameraPosition.x,
+            cameraPosition.y,
+            cameraPosition.z
+          );
+          controlsRef.current.enabled = controlsEnabled;
+          setIsLoginVisible(!controlsEnabled);
+        }
+      }
+    }
+  }, [isInitialized]);
+
+  const saveState = () => {
+    if (globeRef.current && cameraRef.current && controlsRef.current) {
+      const state = {
+        globePosition: {
+          x: globeRef.current.position.x,
+          y: globeRef.current.position.y,
+          z: globeRef.current.position.z,
+        },
+        cameraPosition: {
+          x: cameraRef.current.position.x,
+          y: cameraRef.current.position.y,
+          z: cameraRef.current.position.z,
+        },
+        controlsEnabled: controlsRef.current.enabled,
+      };
+      localStorage.setItem("earthState", JSON.stringify(state));
+    }
+  };
+
+  const handleVisibilityChange = () => {
+    if (!document.hidden && isInitialized) {
+      const savedState = localStorage.getItem("earthState");
+      if (savedState) {
+        const { globePosition, cameraPosition, controlsEnabled } =
+          JSON.parse(savedState);
+        if (globeRef.current && cameraRef.current && controlsRef.current) {
+          globeRef.current.position.set(
+            globePosition.x,
+            globePosition.y,
+            globePosition.z
+          );
+          cameraRef.current.position.set(
+            cameraPosition.x,
+            cameraPosition.y,
+            cameraPosition.z
+          );
+          controlsRef.current.enabled = controlsEnabled;
+          setIsLoginVisible(!controlsEnabled);
+        }
+      }
+    }
+  };
+
   return (
-    <div className="relative h-screen w-full overflow-hidden">
-      <div
-        id="earth-container"
-        ref={containerRef}
-        className="absolute left-0 top-0 h-full w-full"
-      />
-      <div
-        ref={formRef}
-        className={`fixed right-52 top-1/2 -translate-y-1/2 transform rounded-lg bg-white p-6 text-black shadow-lg ${
-          isLoginVisible ? "opacity-100" : "pointer-events-none opacity-0"
-        } transition-opacity duration-300`}
-      >
-        <h2 className="mb-4 text-xl font-bold">Login</h2>
-        <form>{/* Login form fields */}</form>
+    <>
+      {isLoading && <Loader />}
+      <div className="relative h-screen w-full overflow-hidden">
+        <div
+          id="earth-container"
+          ref={containerRef}
+          className="absolute left-0 top-0 h-full w-full"
+        />
+        <div
+          ref={formRef}
+          className={`fixed right-52 top-1/2 -translate-y-1/2 transform rounded-lg bg-white p-6 text-black shadow-lg ${
+            isLoginVisible ? "opacity-100" : "pointer-events-none opacity-0"
+          } transition-opacity duration-300`}
+        >
+          <FuturisticAuthForm />
+        </div>
       </div>
-    </div>
+    </>
   );
 };
 
